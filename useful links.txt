@@ -1,0 +1,3 @@
+https://www.r-bloggers.com/sentiment-analysis-with-machine-learning-in-r/
+
+https://www.slideshare.net/tharinduzonic/supervised-learning-based-approach-to-aspect-based-sentiment-analysis
