@@ -15,6 +15,14 @@ require("tidytext")
 require("quanteda")
 require("pracma")#for strcmp
 require("mosaic")# for zscore
+require("glm2")#for glm  training
+
+
+require('e1071')
+require('SparseM')
+require('tm')
+
+
 docxml=ldply(xmlToList("Restaurants_Train.xml"), data.frame)
 sentence <- as.data.frame(unique(docxml$text))
 
@@ -332,6 +340,8 @@ noun<- noun[-which(noun$word %in% lexicon$word),]
 #remove stopwords
 noun$word = removeWords(noun$word, stopwords("english"))
 
+
+                                                                      #######Word n-grams Features######
 #find context
 for(i in 1:nrow(sent_split))
 for(j in 1:nrow(noun))
@@ -371,7 +381,7 @@ words2$bigrams[i]<- gsub("_"," ",words2$bigrams[i])
 
 words<- rbind(words,words2)
 
-
+                                                                        ######Z score Features######
 master <- matrix(0, nrow=nrow(words), ncol=nrow(train500))
 
 
@@ -393,26 +403,137 @@ for(i in 1:nrow(train500))
 #made head the subset of master since the data is too big
 head<- as.data.frame(master[c(1:nrow(master)),c(1:10)])
 
-names(master)<-seq(length=nrow(train500))
-
-#########################################################NOT WORKING ################################################################################
-
-for(i in 1:10)
-zscore[i] <- sum(zscore(head[i,])[which(zscore(head[i,])>0)])
-
-
-#####NEEDS TO BE DONE AFTER TRANSPOSE
-#To find the sum of zscore >0(according to the research paper)
-zscore[i]<-sum(zscore(master[i,])[which(zscore(master[i,])>0)])
-#####
 
 master <- t(master)
 
+head <- as.data.frame(master)
+
+row.names(master)<-words$word
+
+names(head)<-seq(length=nrow(train500))
 
 
+for( i in 1:ncol(head))
+zscore[i]<-sum(zscore(head[i,]))
 
+#zscore is saved in master$zscore
+for(i in 1: nrow(master))
+ master$zscore[i]<- zscore[i]
 
+#aspects are saved in master$aspect   #####MIGHT CAUSE PROBLEMS SINCE THIS IS TEXT IN NUMERICAL MATRIX
+#for(i in 1: nrow(master))
+# master$aspect[i]<- train500$noun[i]
 
+ head <- as.data.frame(t(master))
+ 
+ #main DataFrame is master
 
+                                      ######Sentiment Lexicon-based Features######
+ 
+ #Create a new df sentlex
+ sentlex <- matrix(0,500,4)
 
+ names(sentlex)<- c("+","-","+/-","last_polarity")
+ 
+ 
+ #count +ve words using lexicon
+ # for(i in 1:nrow(train500))
+ # sentlex[i,1]<- length( which(lexicon$word %in% unlist(strsplit(tolower(train500$Text[i])," "))))
+ for(i in 1:nrow(train500))
+   sentlex[i,1]<-sum(lexicon$value[which(lexicon$word %in% unlist(strsplit(tolower(train500$Text[i])," ")))] > 0)
+ #count -ve words using lexicon
+ for(i in 1:nrow(train500))
+   sentlex[i,2]<-sum(lexicon$value[which(lexicon$word %in% unlist(strsplit(tolower(train500$Text[i])," ")))] < 0)
+ 
+ #work on master and then transform to head to view the data 
+ #+/-
+ for(i in 1:nrow(sentlex))
+ {
+   sentlex[i,3]<-sentlex[i,1]/sentlex[i,2]
+   
+   if(sentlex[i,3] == "NaN" |sentlex[i,3] == "Inf"  ) 
+     sentlex[i,3]<-0
+   
+ }
+ #polarity of the last word
+ for(i in 1:nrow(sentlex))
+ {  
+   sentarr <- unlist(strsplit(tolower(train500$Text[i])," "))
+   arr <- which(unlist(strsplit(tolower(train500$Text[i])," ")) %in% lexicon$word)
+   last <- sentarr[arr[length(arr)]]
+   if(!is.integer0(lexicon$value[which(lexicon$word %in% last)]))
+     sentlex[i,4]<- lexicon$value[which(lexicon$word %in% last)]
+   else 
+     sentlex[i,4]<-0
+   
+ } 
+ 
+ #polarity of each sentence
+ for(i in 1:nrow(sentlex))
+ {
+   if(sentlex$`+`[i] - sentlex$`-`[i] >0)
+     sentlex$polarity[i] <- 1
+   else if((sentlex$`+`[i] - sentlex$`-`[i] < 0))
+     sentlex$polarity[i]<- -1
+ }
+ 
+ #add findings of sentlex into master and then transform to head to view data
+####################################### 
+ for(i in 1:nrow(master))
+   master$'+'[i] <- sentlex$`+`[i]
+ 
+ for(i in 1:nrow(master))
+   master$'-'[i] <- sentlex$`-`[i]
+ 
+ for(i in 1:nrow(master))
+   master$'+/-'[i] <- sentlex$`+/-`[i]
+ 
+ for(i in 1:nrow(master))
+   master$last_polarity[i] <- sentlex$last_polarity[i]
+ 
+ for(i in 1:nrow(master))
+   master$polarity[i]<- sentlex$polarity[i]
+#############################################
+#######################################################################NOT WORKING ################################################################################
+ 
+ #http://blog.thedigitalgroup.com/rajendras/2015/05/28/supervised-learning-for-text-classification/
+ 
+ traindata <- as.data.frame(train500[1:400,c(1,3)])
+ testdata <- as.data.frame(train500[401:500,c(1,3)])
 
+ # SEPARATE TEXT VECTOR TO CREATE Source(),
+ # Corpus() CONSTRUCTOR FOR DOCUMENT TERM
+ # MATRIX TAKES Source() 
+ trainvector <- as.vector(traindata$Text)
+  testvector <- as.vector(testdata$Text)
+  
+  
+  # CREATE SOURCE FOR VECTORS
+  trainsource <- VectorSource(trainvector)
+  testsource <- VectorSource(testvector)
+ 
+  # CREATE CORPUS FOR DATA
+  traincorpus <- Corpus(trainsource)
+  testcorpus <- Corpus(testsource)
+  
+  # PERFORMING THE VARIOUS TRANSFORMATION on "traincorpus" and "testcorpus" DATASETS #SUCH AS TRIM WHITESPACE, REMOVE PUNCTUATION, REMOVE STOPWORDS.
+  traincorpus <- tm_map(traincorpus,stripWhitespace)
+  traincorpus <- tm_map(traincorpus,tolower)
+  traincorpus <- tm_map(traincorpus, removeWords,stopwords("english"))
+  traincorpus<- tm_map(traincorpus,removePunctuation)
+  
+  testcorpus <- tm_map(testcorpus,stripWhitespace)
+  testcorpus <- tm_map(testcorpus,tolower)
+  testcorpus <- tm_map(testcorpus, removeWords,stopwords("english"))
+  testcorpus<- tm_map(testcorpus,removePunctuation)
+ 
+  # CREATE TERM DOCUMENT MATRIX
+  trainmatrix <- t(TermDocumentMatrix(traincorpus))
+  testmatrix <- t(TermDocumentMatrix(testcorpus))
+  
+  # TRAIN NAIVE BAYES MODEL USING trainmatrix DATA AND traindate$Journal_group CLASS VECTOR
+  ###model <- naiveBayes(as.matrix(trainmatrix),as.factor(traindata$polarity))
+  model2 <- glm(polarity~., data = traindata)
+  # PREDICTION
+  #results <- predict(model,as.matrix(testmatrix))
+  log_predict <- predict(model2,newdata = testdata,type = "response")
